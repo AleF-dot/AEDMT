@@ -1,123 +1,119 @@
 import os
-import re
-from nltk.sentiment import SentimentIntensityAnalyzer
-import nltk
-from pathlib import Path
 import json
+from pathlib import Path
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+import torch
 
-nltk.download('vader_lexicon')
+# Configuración del modelo
+model_name = "finiteautomata/beto-sentiment-analysis"
+tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=False)
+model = AutoModelForSequenceClassification.from_pretrained(model_name)
 
-# Directorio base
-directorio_base = os.path.dirname(os.path.abspath(__file__))
+id2label = {0: 'NEG', 1: 'NEU', 2: 'POS'}
 
-# Rutas de archivos
-RUTA_TEXTO_CRUDO = os.path.join(directorio_base, "datos", "muestra.txt")
-CARPETA_CITAS_EXACTAS = os.path.join(directorio_base, "datos", "citas_exactas")
-CARPETA_CITAS_ENRIQUECIDAS = os.path.join(directorio_base, "datos", "citas_enriquecidas")
-Path(CARPETA_CITAS_EXACTAS).mkdir(parents=True, exist_ok=True)
-Path(CARPETA_CITAS_ENRIQUECIDAS).mkdir(parents=True, exist_ok=True)
+def analizar_cita(texto):
+    enc = tokenizer(texto, return_tensors="pt", truncation=True, max_length=512)
+    out = model(**enc)
+    probs = torch.softmax(out.logits, dim=-1)[0].tolist()
+    etiqueta_raw = id2label[int(torch.argmax(out.logits, dim=-1))]
+    etiquetas_traducidas = {'NEG': 'negativo', 'NEU': 'neutral', 'POS': 'positivo'}
+    etiqueta = etiquetas_traducidas[etiqueta_raw]
+    return {
+        'probs': {'neg': probs[0], 'neu': probs[1], 'pos': probs[2]},
+        'label': etiqueta
+    }
 
-sia = SentimentIntensityAnalyzer()
+# Función para procesar una carpeta
+def procesar_carpeta(nombre_conjunto, ruta_carpeta):
+    resultados_por_concepto = {}
 
-# Función para analizar el sentimiento de un texto en chunks
-def analizar_texto_en_chunks(texto, chunk_size=25000):
-    chunks = [texto[i:i+chunk_size] for i in range(0, len(texto), chunk_size)]
-    puntajes = {'neg': 0, 'neu': 0, 'pos': 0}
-    for idx, chunk in enumerate(chunks):
-        score = sia.polarity_scores(chunk)
-        for k in puntajes:
-            puntajes[k] += score[k]
-        print(f"Chunk {idx+1}/{len(chunks)} procesado.")
-    num_chunks = len(chunks)
-    return {k: puntajes[k]/num_chunks for k in puntajes}
-
-# Función para analizar citas en una carpeta
-def analizar_citas_en_carpeta(ruta_carpeta):
-    """Analiza sentimiento de cada archivo de citas en una carpeta y devuelve resultados por concepto."""
-    resultados = {}
     for archivo in os.listdir(ruta_carpeta):
         if not archivo.endswith(".json"):
             continue
-        concepto = archivo[:-5]  # quitar ".json"
-        ruta_archivo = os.path.join(ruta_carpeta, archivo)
-        with open(ruta_archivo, "r", encoding="utf-8") as f:
-            citas_dict = json.load(f)
-        
-        puntajes_citas = []
-        for cita in citas_dict.values():
-            cita = cita.strip().replace('\n', ' ')
-            puntaje = sia.polarity_scores(cita)
-            puntajes_citas.append(puntaje)
-        if puntajes_citas:
-            avg_neg = sum(p['neg'] for p in puntajes_citas) / len(puntajes_citas)
-            avg_neu = sum(p['neu'] for p in puntajes_citas) / len(puntajes_citas)
-            avg_pos = sum(p['pos'] for p in puntajes_citas) / len(puntajes_citas)
-        else:
-            avg_neg = avg_neu = avg_pos = 0
-        resultados[concepto] = {
-            "num_citas": len(puntajes_citas),
-            "avg_neg": avg_neg,
-            "avg_neu": avg_neu,
-            "avg_pos": avg_pos,
+
+        concepto = archivo[:-5]
+        ruta = os.path.join(ruta_carpeta, archivo)
+        with open(ruta, encoding="utf-8") as f:
+            citas = json.load(f)
+
+        resultados = {}
+        suma = {'neg': 0, 'neu': 0, 'pos': 0}
+        conteo = {'negativo': 0, 'neutral': 0, 'positivo': 0}
+
+        for cid, texto in citas.items():
+            resultado = analizar_cita(texto.replace('\n', ' '))
+            resultados[cid] = resultado
+
+            for k in suma:
+                suma[k] += resultado['probs'][k]
+            conteo[resultado['label']] += 1
+
+        total = len(resultados)
+        media = {k: suma[k] / total for k in suma}
+
+        tops = {}
+        for clase in ['neg', 'neu', 'pos']:
+            orden = sorted(resultados.items(), key=lambda x: x[1]['probs'][clase], reverse=True)
+            tops[clase] = [cid for cid, _ in orden[:5]]
+
+        resultados_por_concepto[concepto] = {
+            'media': media,
+            'conteo': conteo,
+            'top': tops
         }
-    return resultados
 
+    # Mostrar resultados por consola
+    print(f"\n==============================")
+    print(f"  RESULTADOS: {nombre_conjunto}")
+    print(f"==============================")
+    for concepto, info in resultados_por_concepto.items():
+        print(f"\n=== Concepto: {concepto} ===")
+        print("Media de scores:", {k: round(v, 3) for k, v in info['media'].items()})
+        print("Conteo por etiqueta:", info['conteo'])
+        print("Top 5 negativos:", info['top']['neg'])
+        print("Top 5 neutrales:", info['top']['neu'])
+        print("Top 5 positivos:", info['top']['pos'])
 
-# Analizar texto completo crudo (en chunks)
-with open(RUTA_TEXTO_CRUDO, "r", encoding="utf-8") as f:
-    texto_completo = f.read().replace('\n', ' ')
+    return resultados_por_concepto
 
-# Asegurarse de que el texto completo no exceda el tamaño máximo
-sentimiento_texto_completo = analizar_texto_en_chunks(texto_completo, chunk_size=25000)
+# Función para analizar el texto completo en chunks
+def analizar_texto_completo(ruta_archivo, chunk_size=512):
+    with open(ruta_archivo, encoding="utf-8") as f:
+        texto = f.read().replace('\n', ' ')
 
-# Analizar citas exactas
-resultados_citas_exactas = analizar_citas_en_carpeta(CARPETA_CITAS_EXACTAS)
+    trozos = [texto[i:i+chunk_size] for i in range(0, len(texto), chunk_size)]
+    suma = {'neg': 0, 'neu': 0, 'pos': 0}
+    total = len(trozos)
 
-# Analizar citas enriquecidas
-resultados_citas_enriquecidas = analizar_citas_en_carpeta(CARPETA_CITAS_ENRIQUECIDAS)
+    for idx, chunk in enumerate(trozos):
+        resultado = analizar_cita(chunk)
+        for k in suma:
+            suma[k] += resultado['probs'][k]
+        print(f"Chunk {idx+1}/{total} analizado.")
 
-# Mostrar resumen (redondeado a 3 decimales)
-print("=== Análisis Sentimiento Texto Completo ===")
-print({k: round(v, 3) for k, v in sentimiento_texto_completo.items()})
-print("\n=== Análisis Sentimiento Citas Exactas ===")
+    media = {k: suma[k] / total for k in suma}
+    return media
 
-# Mostrar resultados de citas exactas
-for concepto, datos in resultados_citas_exactas.items():
-    datos_redondeados = {k: round(v, 3) if isinstance(v, float) else v for k, v in datos.items()}
-    print(f"{concepto}: {datos_redondeados}")
+# Rutas
+BASE = os.path.dirname(os.path.abspath(__file__))
+CARPETA_EXACTAS = os.path.join(BASE, "datos", "citas_exactas")
+CARPETA_ENRIQUECIDAS = os.path.join(BASE, "datos", "citas_enriquecidas")
+CARPETA_SALIDA = os.path.join(BASE, "datos", "sentimientos")
+Path(CARPETA_SALIDA).mkdir(parents=True, exist_ok=True)
 
-# Mostrar resultados de citas enriquecidas
-print("\n=== Análisis Sentimiento Citas Enriquecidas ===")
-for concepto, datos in resultados_citas_enriquecidas.items():
-    datos_redondeados = {k: round(v, 3) if isinstance(v, float) else v for k, v in datos.items()}
-    print(f"{concepto}: {datos_redondeados}")
+# Ejecutar y guardar resultados
+resultados_citas_exactas = procesar_carpeta("CITAS EXACTAS", CARPETA_EXACTAS)
+resultados_citas_enriquecidas = procesar_carpeta("CITAS ENRIQUECIDAS", CARPETA_ENRIQUECIDAS)
 
-# Función para comparar sentimientos entre texto completo, citas exactas y citas enriquecidas
-def comparar_sentimientos(texto_completo, citas_exactas, citas_enriquecidas):
-    print("=== Comparación Sentimientos por Concepto ===")
-    for concepto in citas_exactas:
-        if concepto in citas_enriquecidas:
-            exactas = citas_exactas[concepto]
-            enriquecidas = citas_enriquecidas[concepto]
-            
-            print(f"\nConcepto: {concepto}")
-            for k in ['avg_neg', 'avg_neu', 'avg_pos']:
-                val_exactas = exactas[k]
-                val_enriquecidas = enriquecidas[k]
-                val_texto = texto_completo[k.replace('avg_', '')]
-                
-                diff_citas = val_enriquecidas - val_exactas
-                diff_texto_exactas = val_exactas - val_texto
-                diff_texto_enriq = val_enriquecidas - val_texto
-                
-                print(f" {k}:")
-                print(f"  - Citas Exactas: {val_exactas:.3f}")
-                print(f"  - Citas Enriquecidas: {val_enriquecidas:.3f}")
-                print(f"  - Diferencia Enriquecidas - Exactas: {diff_citas:+.3f}")
-                print(f"  - Diferencia Exactas - Texto Completo: {diff_texto_exactas:+.3f}")
-                print(f"  - Diferencia Enriquecidas - Texto Completo: {diff_texto_enriq:+.3f}")
-        else:
-            print(f"\nConcepto {concepto} no encontrado en citas enriquecidas.")
+with open(os.path.join(CARPETA_SALIDA, "citas_exactas.json"), "w", encoding="utf-8") as f:
+    json.dump(resultados_citas_exactas, f, ensure_ascii=False, indent=2)
 
-# Comparar sentimientos entre texto completo, citas exactas y enriquecidas
-comparar_sentimientos(sentimiento_texto_completo, resultados_citas_exactas, resultados_citas_enriquecidas)
+with open(os.path.join(CARPETA_SALIDA, "citas_enriquecidas.json"), "w", encoding="utf-8") as f:
+    json.dump(resultados_citas_enriquecidas, f, ensure_ascii=False, indent=2)
+
+# Analizar el texto completo muestra.txt
+ruta_muestra = os.path.join(BASE, "datos", "muestra.txt")
+media_muestra = analizar_texto_completo(ruta_muestra, chunk_size=512)
+
+print("\n=== Media de scores para texto completo 'muestra.txt' ===")
+print({k: round(v, 3) for k, v in media_muestra.items()})
