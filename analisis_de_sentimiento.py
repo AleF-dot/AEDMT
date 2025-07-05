@@ -115,5 +115,8 @@ with open(os.path.join(CARPETA_SALIDA, "citas_enriquecidas.json"), "w", encoding
 ruta_muestra = os.path.join(BASE, "datos", "muestra.txt")
 media_muestra = analizar_texto_completo(ruta_muestra, chunk_size=512)
 
+with open(os.path.join(CARPETA_SALIDA, "media_muestra.json"), "w", encoding="utf-8") as f:
+    json.dump(media_muestra, f, ensure_ascii=False, indent=2)
+
 print("\n=== Media de scores para texto completo 'muestra.txt' ===")
 print({k: round(v, 3) for k, v in media_muestra.items()})
