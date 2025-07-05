@@ -17,8 +17,8 @@ except NameError:
 # Rutas de archivos
 ruta_txt = os.path.join(directorio_base, "datos", "muestra.txt")
 
-directorio_exactas = os.path.join(directorio_base, "datos", "citas_extra", "exactas")
-directorio_enriquecidas = os.path.join(directorio_base, "datos", "citas_extra", "enriquecidas")
+directorio_exactas = os.path.join(directorio_base, "datos", "citas", "citas_extra", "exactas")
+directorio_enriquecidas = os.path.join(directorio_base, "datos", "citas", "citas_extra", "enriquecidas")
 Path(directorio_exactas).mkdir(parents=True, exist_ok=True)
 Path(directorio_enriquecidas).mkdir(parents=True, exist_ok=True)
 

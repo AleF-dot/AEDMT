@@ -96,8 +96,8 @@ def analizar_texto_completo(ruta_archivo, chunk_size=512):
 
 # Rutas
 BASE = os.path.dirname(os.path.abspath(__file__))
-CARPETA_EXACTAS = os.path.join(BASE, "datos", "citas_exactas")
-CARPETA_ENRIQUECIDAS = os.path.join(BASE, "datos", "citas_enriquecidas")
+CARPETA_EXACTAS = os.path.join(BASE, "datos", "citas", "citas_exactas")
+CARPETA_ENRIQUECIDAS = os.path.join(BASE, "datos", "citas", "citas_enriquecidas")
 CARPETA_SALIDA = os.path.join(BASE, "datos", "sentimientos")
 Path(CARPETA_SALIDA).mkdir(parents=True, exist_ok=True)
 

@@ -18,8 +18,8 @@ except NameError:
 ruta_txt = os.path.join(directorio_base, "datos", "muestra.txt")
 
 # Directorios donde se guardarán las citas exactas y enriquecidas
-directorio_exactas = os.path.join(directorio_base, "datos", "citas_exactas")
-directorio_enriquecidas = os.path.join(directorio_base, "datos", "citas_enriquecidas")
+directorio_exactas = os.path.join(directorio_base, "datos", "citas", "citas_exactas")
+directorio_enriquecidas = os.path.join(directorio_base, "datos", "citas", "citas_enriquecidas")
 
 # Crear directorios si no existen
 Path(directorio_exactas).mkdir(parents=True, exist_ok=True)
